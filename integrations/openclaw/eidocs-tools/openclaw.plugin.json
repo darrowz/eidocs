@@ -1,11 +1,18 @@
 {
+  "id": "eidocs-tools",
   "name": "eidocs-tools",
   "version": "0.1.0",
   "description": "Lightweight OpenClaw tools for eidocs document ingest/query",
   "entry": "index.js",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
   "tools": [
     "eidocs_ingest",
     "eidocs_status",
+    "eidocs_recent",
     "eidocs_query",
     "eidocs_summarize"
   ]
