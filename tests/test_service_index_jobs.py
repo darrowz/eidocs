@@ -27,6 +27,16 @@ def test_job_submit_and_run_once(tmp_path):
     assert processed[0].doc_id
 
 
+def test_job_submit_deduplicates_same_file_sha(tmp_path):
+    doc = tmp_path / "dup.md"
+    doc.write_text("Duplicate document", encoding="utf-8")
+    store = JobStore(tmp_path / "store")
+    first = store.submit_ingest(doc, source="openclaw")
+    second = store.submit_ingest(doc, source="openclaw")
+    assert second.job_id == first.job_id
+    assert len(list(store.jobs_dir.glob("*.json"))) == 1
+
+
 def test_job_run_once_returns_empty_when_worker_lock_exists(tmp_path):
     store = JobStore(tmp_path / "store")
     lock = store.jobs_dir / ".worker.lock"

@@ -73,6 +73,17 @@ class JobStore:
         actor: str = "cli",
     ) -> JobRecord:
         assessment = self.policy.validate_path(Path(path))
+        existing = self._find_existing(assessment.sha256)
+        if existing and existing.status in {"pending", "running", "completed"}:
+            self.audit.write(
+                actor=actor,
+                op="ingest.deduplicated",
+                decision="accepted",
+                job_id=existing.job_id,
+                sha256=assessment.sha256,
+                source=source,
+            )
+            return existing
         job_id = stable_id("job", {"path": assessment.path, "sha256": assessment.sha256, "ts": utc_now()}, 24)
         staged = self.incoming_dir / f"{job_id}{Path(assessment.path).suffix.lower()}"
         shutil.copy2(assessment.path, staged)
@@ -161,6 +172,18 @@ class JobStore:
 
     def _pending(self) -> list[JobRecord]:
         return sorted([item for item in self._all() if item.status == "pending"], key=lambda item: item.created_at)
+
+    def _find_existing(self, sha256: str) -> JobRecord | None:
+        matches: list[JobRecord] = []
+        for record in self._all():
+            assessment = dict(record.meta.get("assessment") or {})
+            if assessment.get("sha256") == sha256:
+                matches.append(record)
+        for status in ["running", "pending", "completed"]:
+            for record in matches:
+                if record.status == status:
+                    return record
+        return matches[0] if matches else None
 
     def _all(self) -> list[JobRecord]:
         records: list[JobRecord] = []

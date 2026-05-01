@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 from functools import partial
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -100,6 +102,8 @@ async def _parse_async(args: argparse.Namespace) -> dict[str, Any]:
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     Path(working_dir).mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
+    if args.parser == "pypdf":
+        return await _parse_with_pypdf(file_path, ["raganything_skipped:pypdf"], output_dir=output_dir)
     try:
         rag = _build_rag(working_dir=working_dir, output_dir=output_dir, parser=args.parser, parse_method=args.parse_method)
         content_list, content_doc_id = await rag.parse_document(
@@ -130,7 +134,7 @@ async def _parse_async(args: argparse.Namespace) -> dict[str, Any]:
         errors.append(f"raganything_parse_failed:{exc.__class__.__name__}:{exc}")
     if args.fallback_pypdf and Path(file_path).suffix.lower() == ".pdf":
         try:
-            return _parse_with_pypdf(file_path, errors)
+            return await _parse_with_pypdf(file_path, errors, output_dir=output_dir)
         except Exception as exc:
             errors.append(f"pypdf_parse_failed:{exc.__class__.__name__}:{exc}")
     return {"ok": False, "errors": errors, "content_list": []}
@@ -182,6 +186,7 @@ async def _llm_model_func(prompt, system_prompt=None, history_messages=None, **k
 
 
 async def _vision_model_func(prompt, system_prompt=None, history_messages=None, image_data=None, messages=None, **kwargs):
+    kwargs.setdefault("model", _vision_model())
     return await _openai_compatible_complete(
         prompt,
         system_prompt=system_prompt,
@@ -239,7 +244,7 @@ async def _openai_compatible_complete(
         else:
             payload_messages.append({"role": "user", "content": prompt})
     payload: dict[str, Any] = {
-        "model": _llm_model(),
+        "model": str(kwargs.pop("model", _llm_model())),
         "messages": payload_messages,
         "temperature": float(os.environ.get("EIDOCS_LLM_TEMPERATURE", "0")),
         "max_tokens": int(kwargs.get("max_tokens") or os.environ.get("EIDOCS_LLM_MAX_TOKENS", "2048")),
@@ -270,7 +275,7 @@ def _post_chat_completion(payload: dict[str, Any]) -> str:
     return str(content)
 
 
-def _parse_with_pypdf(file_path: str, errors: list[str]) -> dict[str, Any]:
+async def _parse_with_pypdf(file_path: str, errors: list[str], *, output_dir: str = "") -> dict[str, Any]:
     from pypdf import PdfReader
 
     reader = PdfReader(file_path)
@@ -279,15 +284,89 @@ def _parse_with_pypdf(file_path: str, errors: list[str]) -> dict[str, Any]:
         text = (page.extract_text() or "").strip()
         if text:
             content.append({"type": "text", "text": text, "page_idx": page_idx})
+    parser = "pypdf:fallback"
+    if not content and os.environ.get("EIDOCS_PDF_IMAGE_FALLBACK", "1") != "0":
+        image_content, image_warnings = await _parse_pdf_images_with_vision(reader, output_dir=output_dir)
+        content.extend(image_content)
+        errors.extend(image_warnings)
+        parser = "pypdf:image-vision-fallback"
     return {
         "ok": True,
-        "parser": "pypdf:fallback",
+        "parser": parser,
         "content_doc_id": "",
         "content_list": content,
         "lightrag_inserted": False,
-        "output_dir": "",
+        "output_dir": output_dir,
         "warnings": errors + ["raganything_degraded_to_pypdf"],
     }
+
+
+async def _parse_pdf_images_with_vision(reader, *, output_dir: str) -> tuple[list[dict[str, Any]], list[str]]:
+    content: list[dict[str, Any]] = []
+    warnings: list[str] = ["pypdf_text_empty"]
+    asset_dir = Path(output_dir or ".").expanduser().resolve() / "pypdf-image-fallback"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    max_pages = max(1, int(os.environ.get("EIDOCS_PDF_IMAGE_FALLBACK_MAX_PAGES", "12")))
+    for page_idx, page in enumerate(reader.pages):
+        if page_idx >= max_pages:
+            break
+        images = list(getattr(page, "images", []) or [])
+        if not images:
+            warnings.append(f"page_image_missing:{page_idx}")
+            continue
+        raw = bytes(images[0].data)
+        image_bytes = _to_jpeg_bytes(raw)
+        image_path = asset_dir / f"page-{page_idx + 1:04d}.jpg"
+        image_path.write_bytes(image_bytes)
+        summary = ""
+        if os.environ.get("EIDOCS_PDF_IMAGE_VISION", "1") != "0":
+            try:
+                summary = await _summarize_pdf_page_image(image_bytes, page_idx=page_idx)
+            except Exception as exc:
+                warnings.append(f"vision_page_summary_failed:{page_idx}:{exc.__class__.__name__}:{exc}")
+        caption = summary or "PDF page image extracted; no embedded text was available."
+        content.append(
+            {
+                "type": "image",
+                "img_path": str(image_path),
+                "image_caption": [caption],
+                "page_idx": page_idx,
+                "metadata": {"fallback": "pypdf_image", "source_image_name": getattr(images[0], "name", "")},
+            }
+        )
+    if len(reader.pages) > max_pages:
+        warnings.append(f"pdf_image_fallback_truncated:{max_pages}/{len(reader.pages)}")
+    if content:
+        warnings.append("pdf_image_vision_fallback")
+    return content, warnings
+
+
+def _to_jpeg_bytes(raw: bytes) -> bytes:
+    try:
+        from PIL import Image
+
+        with Image.open(BytesIO(raw)) as image:
+            image = image.convert("RGB")
+            image.thumbnail((1600, 1600))
+            output = BytesIO()
+            image.save(output, format="JPEG", quality=85, optimize=True)
+            return output.getvalue()
+    except Exception:
+        return raw
+
+
+async def _summarize_pdf_page_image(image_bytes: bytes, *, page_idx: int) -> str:
+    prompt = (
+        "Extract the visible content from this PDF page for retrieval. "
+        "Preserve headings, names, dates, numbers, table facts, and conclusions. "
+        "Return concise markdown in the document language. "
+        f"Page number: {page_idx + 1}."
+    )
+    return await _vision_model_func(
+        prompt,
+        image_data=base64.b64encode(image_bytes).decode("ascii"),
+        max_tokens=int(os.environ.get("EIDOCS_PDF_IMAGE_VISION_MAX_TOKENS", "900")),
+    )
 
 
 def _normalize_content_list(content_list: Any) -> list[dict[str, Any]]:
@@ -330,6 +409,10 @@ def _chat_endpoint() -> str:
 
 def _llm_model() -> str:
     return os.environ.get("EIDOCS_LLM_MODEL") or os.environ.get("LLM_MODEL") or "qwen3-max-2026-01-23"
+
+
+def _vision_model() -> str:
+    return os.environ.get("EIDOCS_VISION_MODEL") or os.environ.get("BAILIAN_IMAGE_MODEL") or _llm_model()
 
 
 def _api_key() -> str:

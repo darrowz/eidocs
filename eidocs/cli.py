@@ -133,10 +133,28 @@ def cmd_query(args: argparse.Namespace) -> dict:
     service = _service(args)
     request = QueryRequest(query=args.query, doc_ids=args.doc_id or None, mode=args.mode, top_k=args.top_k)
     if args.mode == "raganything":
-        result = asyncio.run(service.aquery(request))
+        try:
+            result = asyncio.run(service.aquery(request))
+            if _raganything_needs_local_fallback(result.to_dict()):
+                fallback = service.query(QueryRequest(query=args.query, doc_ids=args.doc_id or None, mode="local", top_k=args.top_k))
+                payload = fallback.to_dict()
+                payload["degraded"] = True
+                payload["warnings"] = list(payload.get("warnings") or []) + ["raganything_query_no_context"]
+                return {"ok": True, "result": payload}
+        except Exception as exc:
+            fallback = service.query(QueryRequest(query=args.query, doc_ids=args.doc_id or None, mode="local", top_k=args.top_k))
+            payload = fallback.to_dict()
+            payload["degraded"] = True
+            payload["warnings"] = list(payload.get("warnings") or []) + [f"raganything_query_failed:{exc.__class__.__name__}:{exc}"]
+            return {"ok": True, "result": payload}
     else:
         result = service.query(request)
     return {"ok": True, "result": result.to_dict()}
+
+
+def _raganything_needs_local_fallback(payload: dict) -> bool:
+    answer = str(payload.get("answer") or "").lower()
+    return not payload.get("hits") or "[no-context]" in answer or "no context" in answer
 
 
 def cmd_export_content_list(args: argparse.Namespace) -> dict:
