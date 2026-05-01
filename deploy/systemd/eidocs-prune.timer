@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily EI Docs prune
+
+[Timer]
+OnCalendar=*-*-* 02:45:00
+Persistent=true
+Unit=eidocs-prune.service
+
+[Install]
+WantedBy=timers.target

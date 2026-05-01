@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+export EIDOCS_ROOT="${EIDOCS_ROOT:-/home/darrow/.local/share/eidocs}"
+exec /dev-project/eibrain/.venv/bin/python -m eidocs.cli "$@"

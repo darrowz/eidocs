@@ -1,0 +1,14 @@
+[Unit]
+Description=EI Docs one-shot ingest worker
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=EIDOCS_ROOT=/home/darrow/.local/share/eidocs
+ExecStart=/home/darrow/.local/bin/eidocs job run-once --limit 1 --storage /home/darrow/.local/share/eidocs
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+MemoryMax=3G
+CPUQuota=150%
+TasksMax=128

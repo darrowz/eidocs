@@ -1,0 +1,13 @@
+[Unit]
+Description=Prune EI Docs completed/failed job metadata
+
+[Service]
+Type=oneshot
+Environment=EIDOCS_ROOT=/home/darrow/.local/share/eidocs
+ExecStart=/home/darrow/.local/bin/eidocs prune --older-than-days 7 --storage /home/darrow/.local/share/eidocs
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+MemoryMax=1G
+CPUQuota=50%
+TasksMax=64

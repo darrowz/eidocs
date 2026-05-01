@@ -1,0 +1,11 @@
+[Unit]
+Description=Run EI Docs ingest worker every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Unit=eidocs-worker.service
+
+[Install]
+WantedBy=timers.target

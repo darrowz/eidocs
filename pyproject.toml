@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eidocs"
+version = "0.1.0"
+description = "Document-understanding sidecar for EI memory and OpenClaw"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+raganything = ["raganything>=1.2.0"]
+test = ["pytest>=7"]
+
+[project.scripts]
+eidocs = "eidocs.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["eidocs*"]
