@@ -8,7 +8,7 @@ from typing import Any
 
 from eidocs.errors import UnsupportedDocumentType
 from eidocs.ids import document_id_for, sha256_file, stable_id
-from eidocs.schema import ContentBlock, DocumentRef, ParsedDocument
+from eidocs.schema import ContentBlock, DocumentRef, ParsedDocument, QueryHit, QueryRequest, QueryResult
 from eidocs.security import detect_magic, read_prefix
 
 
@@ -39,8 +39,8 @@ class RAGSubprocessParser:
         sha = sha256_file(source)
         doc_id = doc_id or document_id_for(source, sha)
         output_dir = self.storage_dir / "raganything-output" / doc_id
-        working_dir = self.storage_dir / "indexes" / "raganything" / doc_id
-        result = self._run_worker(source, output_dir=output_dir, working_dir=working_dir)
+        working_dir = self._working_dir(doc_id)
+        result = self._run_parse_worker(source, output_dir=output_dir, working_dir=working_dir, doc_id=doc_id)
         content_list = result.get("content_list") or []
         if not content_list:
             raise UnsupportedDocumentType("RAG-Anything returned an empty content_list")
@@ -54,43 +54,74 @@ class RAGSubprocessParser:
         )
         blocks = _blocks_from_content_list(doc_id, content_list, asset_base_dir=Path(result.get("output_dir") or output_dir))
         warnings = list(result.get("warnings") or [])
-        metadata_warning = f"raganything_output_dir:{result.get('output_dir') or ''}"
         if result.get("output_dir"):
-            warnings.append(metadata_warning)
+            warnings.append(f"raganything_output_dir:{result.get('output_dir')}")
+        if result.get("lightrag_inserted"):
+            warnings.append(f"lightrag_index_dir:{working_dir}")
         return ParsedDocument(document=document, content=blocks, parser=str(result.get("parser") or self.name), warnings=warnings)
 
+    def query(self, request: QueryRequest) -> QueryResult:
+        if not request.doc_ids or len(request.doc_ids) != 1:
+            return QueryResult(answer="", hits=[], mode="raganything", degraded=True, warnings=["raganything_query_requires_one_doc_id"])
+        doc_id = request.doc_ids[0]
+        payload = self._run_query_worker(doc_id=doc_id, query=request.query, mode=request.mode)
+        answer = str(payload.get("answer") or "")
+        return QueryResult(
+            answer=answer,
+            hits=[
+                QueryHit(
+                    doc_id=doc_id,
+                    block_id="lightrag_answer",
+                    type="raganswer",
+                    score=1.0 if answer else 0.0,
+                    page_idx=None,
+                    snippet=answer[:800],
+                    source_path=str(self._working_dir(doc_id)),
+                )
+            ]
+            if answer
+            else [],
+            mode="raganything",
+            degraded=False,
+            warnings=[],
+        )
+
     def status(self) -> dict[str, Any]:
-        env = self._env()
         proc = subprocess.run(
             [self.python_executable, "-m", "eidocs.rag_worker", "status"],
             text=True,
             capture_output=True,
             timeout=60,
-            env=env,
+            env=self._env(),
         )
         return _parse_worker_json(proc)
 
-    def _run_worker(self, source: Path, *, output_dir: Path, working_dir: Path) -> dict[str, Any]:
+    def _run_parse_worker(self, source: Path, *, output_dir: Path, working_dir: Path, doc_id: str) -> dict[str, Any]:
         output_dir.mkdir(parents=True, exist_ok=True)
         working_dir.mkdir(parents=True, exist_ok=True)
+        command = [
+            self.python_executable,
+            "-m",
+            "eidocs.rag_worker",
+            "parse",
+            "--file",
+            str(source),
+            "--output-dir",
+            str(output_dir),
+            "--working-dir",
+            str(working_dir),
+            "--doc-id",
+            doc_id,
+            "--parse-method",
+            os.environ.get("EIDOCS_RAG_PARSE_METHOD", "auto"),
+            "--parser",
+            os.environ.get("EIDOCS_RAG_PARSER", "mineru"),
+            "--fallback-pypdf",
+        ]
+        if os.environ.get("EIDOCS_RAG_INDEX", "1") != "0":
+            command.append("--insert-lightrag")
         proc = subprocess.run(
-            [
-                self.python_executable,
-                "-m",
-                "eidocs.rag_worker",
-                "parse",
-                "--file",
-                str(source),
-                "--output-dir",
-                str(output_dir),
-                "--working-dir",
-                str(working_dir),
-                "--parse-method",
-                os.environ.get("EIDOCS_RAG_PARSE_METHOD", "auto"),
-                "--parser",
-                os.environ.get("EIDOCS_RAG_PARSER", "mineru"),
-                "--fallback-pypdf",
-            ],
+            command,
             text=True,
             capture_output=True,
             timeout=self.timeout_seconds,
@@ -102,12 +133,41 @@ class RAGSubprocessParser:
             raise UnsupportedDocumentType(f"RAG-Anything parse failed: {message}")
         return payload
 
+    def _run_query_worker(self, *, doc_id: str, query: str, mode: str) -> dict[str, Any]:
+        proc = subprocess.run(
+            [
+                self.python_executable,
+                "-m",
+                "eidocs.rag_worker",
+                "query",
+                "--working-dir",
+                str(self._working_dir(doc_id)),
+                "--query",
+                query,
+                "--mode",
+                mode,
+            ],
+            text=True,
+            capture_output=True,
+            timeout=int(os.environ.get("EIDOCS_RAG_QUERY_TIMEOUT_SECONDS", "240")),
+            env=self._env(),
+        )
+        payload = _parse_worker_json(proc)
+        if proc.returncode != 0 or not payload.get("ok"):
+            message = payload.get("errors") or proc.stderr[-2000:] or proc.stdout[-2000:]
+            raise UnsupportedDocumentType(f"RAG-Anything query failed: {message}")
+        return payload
+
+    def _working_dir(self, doc_id: str) -> Path:
+        return self.storage_dir / "indexes" / "raganything" / doc_id
+
     def _env(self) -> dict[str, str]:
         env = dict(os.environ)
         source_dir = os.environ.get("EIDOCS_SOURCE_DIR", "/dev-project/eidocs")
         rag_bin = str(Path(self.python_executable).expanduser().parent.resolve())
         env["PYTHONPATH"] = source_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         env["PATH"] = rag_bin + os.pathsep + env.get("PATH", "")
+        env.setdefault("EIDOCS_ENV_FILE", "/home/darrow/api-keys.env")
         return env
 
 

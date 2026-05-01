@@ -89,9 +89,7 @@ class EiDocsService:
 
     async def aquery(self, request: QueryRequest) -> QueryResult:
         if request.mode == "raganything" or request.multimodal_content:
-            if not self.rag_adapter:
-                return QueryResult(answer="", hits=[], mode="local", degraded=True, warnings=["raganything_unavailable"])
-            return await self.rag_adapter.query(request)
+            return self.rag_parser.query(request)
         return self.query(request)
 
     def load_parsed(self, doc_id: str) -> ParsedDocument:

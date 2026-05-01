@@ -5,6 +5,11 @@ After=network-online.target
 [Service]
 Type=oneshot
 Environment=EIDOCS_ROOT=/home/darrow/.local/share/eidocs
+Environment=EIDOCS_ENV_FILE=/home/darrow/api-keys.env
+Environment=EIDOCS_OLLAMA_HOST=http://honjia:11434
+Environment=EIDOCS_OLLAMA_EMBED_MODEL=mxbai-embed-large:latest
+Environment=EIDOCS_EMBEDDING_DIM=1024
+Environment=EIDOCS_RAG_INDEX=1
 ExecStart=/home/darrow/.local/bin/eidocs job run-once --limit 1 --storage /home/darrow/.local/share/eidocs
 Nice=10
 NoNewPrivileges=yes

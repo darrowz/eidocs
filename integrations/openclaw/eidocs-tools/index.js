@@ -28,16 +28,17 @@ function documentStatus({ job_id }) {
   return run(["job", "status", job_id], 2000);
 }
 
-function documentQuery({ query, top_k = 8, doc_id = [] }) {
-  const args = ["query", query, "--top-k", String(Math.min(Math.max(Number(top_k) || 8, 1), 8))];
+function documentQuery({ query, top_k = 8, doc_id = [], mode = "" }) {
+  const selectedMode = mode || ((doc_id || []).length === 1 ? "raganything" : "local");
+  const args = ["query", query, "--top-k", String(Math.min(Math.max(Number(top_k) || 8, 1), 8)), "--mode", selectedMode];
   for (const id of doc_id || []) {
     args.push("--doc-id", id);
   }
   return run(args, 30000);
 }
 
-function documentSummarize({ query, doc_id = [] }) {
-  return documentQuery({ query, top_k: 5, doc_id });
+function documentSummarize({ query, doc_id = [], mode = "" }) {
+  return documentQuery({ query, top_k: 5, doc_id, mode });
 }
 
 function registerTool(api, spec) {
@@ -72,6 +73,7 @@ const queryParam = {
   properties: {
     query: { type: "string" },
     top_k: { type: "number", default: 8 },
+    mode: { type: "string", enum: ["local", "raganything"], default: "" },
     doc_id: { type: "array", items: { type: "string" }, default: [] }
   }
 };

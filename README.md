@@ -2,12 +2,16 @@
 
 `eidocs` is a document-understanding sidecar for the EI stack.
 
-It now has a real RAG-Anything parsing path for complex documents:
+It has a real RAG-Anything parsing and LightRAG indexing path for complex
+documents:
 
 - PDF/Office files are routed to an isolated RAG-Anything/MinerU subprocess.
 - RAG-Anything emits a standard `content_list`.
 - `eidocs` converts that list into stable `text/table/image/equation` blocks.
-- The local index answers lightweight cited queries.
+- Parsed content is inserted into RAG-Anything/LightRAG when `EIDOCS_RAG_INDEX=1`.
+- Embeddings use honjia Ollama by default: `mxbai-embed-large:latest`.
+- LLM calls use the existing DashScope/Bailian OpenAI-compatible endpoint from
+  `/home/darrow/api-keys.env`.
 - `eimemory` receives only meaningful document-level events.
 
 Runtime paths:
@@ -27,7 +31,7 @@ memory runtime do not inherit MinerU/RAG-Anything dependencies.
 ```bash
 eidocs check-raganything
 eidocs ingest ./report.pdf
-eidocs query "what does the revenue table say?"
+eidocs query "what does the revenue table say?" --mode raganything --doc-id DOC_ID
 eidocs export-content-list DOC_ID
 eidocs sync-eimemory DOC_ID --dry-run
 
@@ -47,6 +51,18 @@ Default safety gates:
 - max estimated PDF pages: `120`
 - reject symlinks, encrypted PDFs, macro Office formats, archives, executables
 - reject MIME/extension mismatch
+
+## RAG configuration
+
+Defaults are set in `/home/darrow/.local/bin/eidocs` and the worker service:
+
+```text
+EIDOCS_OLLAMA_HOST=http://honjia:11434
+EIDOCS_OLLAMA_EMBED_MODEL=mxbai-embed-large:latest
+EIDOCS_EMBEDDING_DIM=1024
+EIDOCS_RAG_INDEX=1
+EIDOCS_ENV_FILE=/home/darrow/api-keys.env
+```
 
 ## eimemory policy
 
