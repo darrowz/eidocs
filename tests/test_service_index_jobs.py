@@ -25,3 +25,11 @@ def test_job_submit_and_run_once(tmp_path):
     processed = store.run_once(limit=1)
     assert processed[0].status == "completed"
     assert processed[0].doc_id
+
+
+def test_job_run_once_returns_empty_when_worker_lock_exists(tmp_path):
+    store = JobStore(tmp_path / "store")
+    lock = store.jobs_dir / ".worker.lock"
+    lock.write_text("busy", encoding="utf-8")
+    assert store.run_once(limit=1) == []
+    lock.unlink()

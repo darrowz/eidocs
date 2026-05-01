@@ -71,7 +71,8 @@ def build_parser() -> argparse.ArgumentParser:
     sync.set_defaults(func=cmd_sync_eimemory)
 
     check = sub.add_parser("check-raganything")
-    check.set_defaults(func=lambda args: {"ok": True, "available": is_raganything_available()})
+    add_common(check)
+    check.set_defaults(func=cmd_check_raganything)
 
     job = sub.add_parser("job")
     job_sub = job.add_subparsers(dest="job_command")
@@ -125,7 +126,7 @@ def cmd_ingest(args: argparse.Namespace) -> dict:
     if not file_path:
         raise EiDocsError("ingest requires a file path")
     parsed = _service(args).ingest(Path(file_path), use_raganything=args.use_raganything)
-    return {"ok": True, "document": parsed.document.to_dict(), "counts": parsed.counts(), "warnings": parsed.warnings}
+    return {"ok": True, "document": parsed.document.to_dict(), "parser": parsed.parser, "counts": parsed.counts(), "warnings": parsed.warnings}
 
 
 def cmd_query(args: argparse.Namespace) -> dict:
@@ -151,6 +152,13 @@ def cmd_sync_eimemory(args: argparse.Namespace) -> dict:
         eimemory_cmd=args.eimemory_cmd or None,
         jsonl_path=Path(args.jsonl_path) if args.jsonl_path else None,
     )
+
+
+def cmd_check_raganything(args: argparse.Namespace) -> dict:
+    service = _service(args)
+    status = service.rag_status()
+    status["active_python_has_raganything"] = is_raganything_available()
+    return status
 
 
 def cmd_job_submit(args: argparse.Namespace) -> dict:

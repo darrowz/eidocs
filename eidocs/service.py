@@ -5,9 +5,10 @@ from pathlib import Path
 
 from .adapters.raganything_adapter import RAGAnythingAdapter, is_raganything_available
 from .audit import AuditLogger
-from .errors import RAGAnythingUnavailable, UnsupportedDocumentType
+from .errors import RAGAnythingUnavailable
 from .index import LocalJsonlIndex
-from .parsers import FallbackParser
+from .parsers import FallbackParser, RAGSubprocessParser
+from .parsers.rag_subprocess import COMPLEX_EXTENSIONS
 from .schema import ParsedDocument, QueryRequest, QueryResult, to_raganything_content_list
 from .security import DocumentPolicy
 
@@ -23,9 +24,20 @@ class EiDocsService:
     ) -> None:
         self.storage_dir = Path(storage_dir).expanduser()
         self.storage_dir.mkdir(parents=True, exist_ok=True)
-        for child in ["incoming", "raw", "jobs", "content-lists", "indexes", "cache", "audit", "tmp"]:
+        for child in [
+            "incoming",
+            "raw",
+            "jobs",
+            "content-lists",
+            "indexes",
+            "cache",
+            "audit",
+            "tmp",
+            "raganything-output",
+        ]:
             (self.storage_dir / child).mkdir(parents=True, exist_ok=True)
         self.parser = parser or FallbackParser()
+        self.rag_parser = RAGSubprocessParser(storage_dir=self.storage_dir)
         self.rag_adapter = rag_adapter
         self.policy = policy or DocumentPolicy()
         self.index = LocalJsonlIndex(self.storage_dir)
@@ -42,10 +54,10 @@ class EiDocsService:
         try:
             assessment = self.policy.validate_path(Path(path))
             source = Path(assessment.path)
-            if use_raganything and source.suffix.lower() in {".pdf", ".docx", ".pptx", ".xlsx"}:
-                if not self.rag_adapter:
-                    raise RAGAnythingUnavailable("RAG-Anything adapter is required for complex document parsing")
-            parsed = self.parser.parse(source, doc_id=doc_id)
+            if source.suffix.lower() in COMPLEX_EXTENSIONS or use_raganything:
+                parsed = self.rag_parser.parse(source, doc_id=doc_id)
+            else:
+                parsed = self.parser.parse(source, doc_id=doc_id)
             self.index.add(parsed)
             self._write_content_list(parsed)
             self.audit.write(
@@ -68,7 +80,7 @@ class EiDocsService:
     async def ainsert_into_raganything(self, parsed: ParsedDocument) -> object:
         if not self.rag_adapter:
             if not is_raganything_available():
-                raise RAGAnythingUnavailable("raganything is not installed")
+                raise RAGAnythingUnavailable("raganything is not installed in the active Python environment")
             self.rag_adapter = RAGAnythingAdapter(self.storage_dir / "indexes" / "raganything")
         return await self.rag_adapter.insert_content_list(parsed)
 
@@ -91,6 +103,9 @@ class EiDocsService:
     def export_content_list(self, doc_id: str) -> list[dict]:
         parsed = self.load_parsed(doc_id)
         return to_raganything_content_list(parsed.content)
+
+    def rag_status(self) -> dict:
+        return self.rag_parser.status()
 
     def _write_content_list(self, parsed: ParsedDocument) -> None:
         payload = {

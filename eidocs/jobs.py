@@ -112,7 +112,10 @@ class JobStore:
 
     def run_once(self, *, limit: int = 1) -> list[JobRecord]:
         lock = self.jobs_dir / ".worker.lock"
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            return []
         os.close(fd)
         try:
             processed: list[JobRecord] = []

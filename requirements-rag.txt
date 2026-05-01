@@ -1,0 +1,2 @@
+raganything[text]==1.2.10
+pypdf==6.10.2
