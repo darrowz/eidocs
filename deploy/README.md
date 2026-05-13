@@ -1,26 +1,52 @@
 # eidocs deployment
 
-The production deployment keeps document processing out of the OpenClaw request
-path.
+`eidocs` is deployed as a production sidecar, not as an editable checkout inside
+the OpenClaw request path. The main CLI runs from `/opt/eidocs/current/.venv`.
+The heavy RAG-Anything/MinerU environment stays isolated in `/opt/eidocs/rag-venv`.
+
+## Canonical paths
+
+| Purpose | Path |
+| --- | --- |
+| Source repository | `/dev-project/eidocs` |
+| Immutable releases | `/opt/eidocs/releases/<commit>` |
+| Active release | `/opt/eidocs/current` |
+| Main virtual environment | `/opt/eidocs/current/.venv` |
+| RAG parser virtual environment | `/opt/eidocs/rag-venv` |
+| Runtime data and indexes | `/var/lib/eidocs` |
+| Runtime configuration | `/etc/eidocs` |
+| Logs | `/var/log/eidocs` |
+
+## Release
 
 ```bash
-/dev-project/eibrain/.venv/bin/python -m pip install -e /dev-project/eidocs
-python3 -m venv /dev-project/eidocs/.venv-rag
-/dev-project/eidocs/.venv-rag/bin/python -m pip install -U pip setuptools wheel
-/dev-project/eidocs/.venv-rag/bin/python -m pip install -r /dev-project/eidocs/requirements-rag.txt
-install -m 0755 /dev-project/eidocs/scripts/eidocs /home/darrow/.local/bin/eidocs
+/dev-project/eidocs/deploy/install_immutable_release.sh
+
+# Optional heavy parser install or refresh:
+INSTALL_RAG=1 /dev-project/eidocs/deploy/install_immutable_release.sh
+```
+
+The script creates a release directory, installs the package into a release-local
+venv, prepares runtime directories, and atomically updates `/opt/eidocs/current`.
+
+## Services
+
+```bash
 mkdir -p /home/darrow/.config/systemd/user
-cp deploy/systemd/eidocs-*.service deploy/systemd/eidocs-*.timer /home/darrow/.config/systemd/user/
+cp /dev-project/eidocs/deploy/systemd/eidocs-*.service /home/darrow/.config/systemd/user/
+cp /dev-project/eidocs/deploy/systemd/eidocs-*.timer /home/darrow/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now eidocs-worker.timer eidocs-prune.timer
 ```
 
-If the user systemd bus is unavailable in a non-interactive SSH session, the
-unit files are still installed and can be enabled from a logged-in session.
+The worker service uses these production defaults:
 
-The RAG-Anything/MinerU environment is intentionally isolated in
-`/dev-project/eidocs/.venv-rag`; the main CLI continues to run in
-`/dev-project/eibrain/.venv`.
+```text
+EIDOCS_ROOT=/var/lib/eidocs
+EIDOCS_CONFIG_DIR=/etc/eidocs
+EIDOCS_ENV_FILE=/etc/eidocs/api-keys.env
+EIDOCS_RAG_PYTHON=/opt/eidocs/rag-venv/bin/python
+```
 
 ## OpenClaw plugin
 
@@ -29,30 +55,20 @@ configuration:
 
 ```bash
 mkdir -p /home/darrow/.openclaw/extensions/eidocs-tools
-cp integrations/openclaw/eidocs-tools/* /home/darrow/.openclaw/extensions/eidocs-tools/
-python3 - <<'PY'
-import json
-from pathlib import Path
-path = Path('/home/darrow/.openclaw/openclaw.json')
-data = json.loads(path.read_text(encoding='utf-8'))
-plugins = data.setdefault('plugins', {})
-entries = plugins.setdefault('entries', {})
-entries.setdefault('eidocs-tools', {})['enabled'] = True
-allow = plugins.setdefault('allow', [])
-if 'eidocs-tools' not in allow:
-    allow.append('eidocs-tools')
-path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-PY
+cp /opt/eidocs/current/integrations/openclaw/eidocs-tools/* /home/darrow/.openclaw/extensions/eidocs-tools/
 systemctl --user restart openclaw-gateway.service
 ```
 
-A healthy gateway log should include `eidocs-tools` in the loaded plugin list,
-for example `http server listening (7 plugins: browser, eidocs-tools, ...)`.
+Set `EIDOCS_CLI=/opt/eidocs/current/.venv/bin/eidocs` in the OpenClaw gateway
+environment when overriding the extension default is needed.
 
-The extension also provides the document cognition loop:
+## Verification
 
-- `eidocs_recent` lists recent background OpenClaw/eidocs jobs.
-- `before_prompt_build` prepends recent eidocs job state so the agent does not
-  claim a PDF skipped eidocs just because the current reply used another parser.
-- auto-ingest writes `/home/darrow/.openclaw/workspace/runtime/eidocs-status.md`
-  as a human-readable runtime note.
+```bash
+/opt/eidocs/current/.venv/bin/eidocs check-raganything
+systemctl --user start eidocs-worker.service
+journalctl --user -u eidocs-worker.service -n 100 --no-pager
+```
+
+`eidocs` writes document-level events to `eimemory`; full blocks remain in the
+eidocs index under `/var/lib/eidocs`.

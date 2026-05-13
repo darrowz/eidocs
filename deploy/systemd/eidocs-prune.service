@@ -3,8 +3,12 @@ Description=Prune EI Docs completed/failed job metadata
 
 [Service]
 Type=oneshot
-Environment=EIDOCS_ROOT=/home/darrow/.local/share/eidocs
-ExecStart=/home/darrow/.local/bin/eidocs prune --older-than-days 7 --storage /home/darrow/.local/share/eidocs
+WorkingDirectory=/opt/eidocs/current
+Environment=EIDOCS_ROOT=/var/lib/eidocs
+Environment=EIDOCS_CONFIG_DIR=/etc/eidocs
+ExecStart=/opt/eidocs/current/.venv/bin/eidocs prune --older-than-days 7 --storage /var/lib/eidocs
+StandardOutput=append:/var/log/eidocs/prune.service.log
+StandardError=append:/var/log/eidocs/prune.service.log
 Nice=10
 NoNewPrivileges=yes
 PrivateTmp=yes

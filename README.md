@@ -18,9 +18,11 @@ Runtime paths:
 
 ```text
 /dev-project/eidocs
-/dev-project/eidocs/.venv-rag
-/home/darrow/.local/share/eidocs
-/home/darrow/.local/bin/eidocs
+/opt/eidocs/current
+/opt/eidocs/rag-venv
+/var/lib/eidocs
+/etc/eidocs
+/var/log/eidocs
 ```
 
 The heavy parser venv is isolated from `eibrain/.venv`, so OpenClaw and the
@@ -54,14 +56,17 @@ Default safety gates:
 
 ## RAG configuration
 
-Defaults are set in `/home/darrow/.local/bin/eidocs` and the worker service:
+Defaults are set in `/opt/eidocs/current/.venv/bin/eidocs` and the worker service:
 
 ```text
 EIDOCS_OLLAMA_HOST=http://honjia:11434
 EIDOCS_OLLAMA_EMBED_MODEL=mxbai-embed-large:latest
 EIDOCS_EMBEDDING_DIM=1024
 EIDOCS_RAG_INDEX=1
-EIDOCS_ENV_FILE=/home/darrow/api-keys.env
+EIDOCS_ROOT=/var/lib/eidocs
+EIDOCS_CONFIG_DIR=/etc/eidocs
+EIDOCS_ENV_FILE=/etc/eidocs/api-keys.env
+EIDOCS_RAG_PYTHON=/opt/eidocs/rag-venv/bin/python
 ```
 
 ## eimemory policy

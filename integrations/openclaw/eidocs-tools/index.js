@@ -2,8 +2,8 @@ const { spawnSync } = require("child_process");
 const fs = require("fs");
 const pathModule = require("path");
 
-const EIDOCS = process.env.EIDOCS_CLI || "/home/darrow/.local/bin/eidocs";
-const ROOT = process.env.EIDOCS_ROOT || "/home/darrow/.local/share/eidocs";
+const EIDOCS = process.env.EIDOCS_CLI || "/opt/eidocs/current/.venv/bin/eidocs";
+const ROOT = process.env.EIDOCS_ROOT || "/var/lib/eidocs";
 const WORKSPACE = process.env.OPENCLAW_WORKSPACE || "/home/darrow/.openclaw/workspace";
 const RECENT_STATE = pathModule.join(WORKSPACE, "runtime", "eidocs-recent.json");
 const RECENT_MARKDOWN = pathModule.join(WORKSPACE, "runtime", "eidocs-status.md");
