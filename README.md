@@ -69,3 +69,21 @@ EIDOCS_ENV_FILE=/home/darrow/api-keys.env
 `eidocs` does not push every chunk into `eimemory`. It only writes a redacted
 document-level event containing the document id, hash, content counts, summary,
 and index reference. Full blocks stay in the `eidocs` index.
+
+`eidocs` does not compute memory quality itself. Scoring is assigned after the
+event lands in `eimemory`, and downstream consumers should expect the stored
+record contract to expose:
+
+- preferred scoring: `meta.scoring.memory_score_v1`
+- legacy compatibility: `meta.quality`
+
+Expected scoring-v1 tiers for downstream consumers:
+
+- `rejected`
+- `candidate`
+- `confirmed`
+- `core`
+
+When `eidocs`-originated records are later exported back out through
+`eimemory`, consumers should prefer the scoring-v1 tier and still honor legacy
+`meta.quality.capture_decision="reject"` for older data.
