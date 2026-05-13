@@ -1,3 +1,5 @@
+"""Tests for eidocs schema models and raganything payload conversion."""
+
 from pathlib import Path
 
 import pytest

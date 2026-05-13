@@ -1,3 +1,11 @@
+"""Core data models for eidocs parsing and query results.
+
+Boundary note:
+- These models describe parsed document artifacts (document, block, query, hit/result).
+- They intentionally do not depend on `eiskills`, `eitraining`, or eimemory internals.
+- Cross-domain consumers should interact with these structures as data contracts.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

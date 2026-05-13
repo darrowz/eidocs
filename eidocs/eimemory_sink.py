@@ -1,3 +1,5 @@
+"""Transport adapter for syncing eidocs ingest events into eimemory."""
+
 from __future__ import annotations
 
 import json
@@ -8,12 +10,17 @@ from typing import Any
 from .schema import ParsedDocument
 
 
+EI_DOCS_EVENT_SOURCE = "eidocs"
+EI_DOCS_DOCUMENT_INGESTED_EVENT = "document_ingested_v1"
+
+
 def build_memory_event(parsed: ParsedDocument, *, index_ref: str) -> dict[str, Any]:
+    """Build a boundary event payload for external eimemory consumers."""
     counts = parsed.counts()
     summary = _summary(parsed)
     return {
-        "type": "document_ingested_v1",
-        "source": "eidocs",
+        "type": EI_DOCS_DOCUMENT_INGESTED_EVENT,
+        "source": EI_DOCS_EVENT_SOURCE,
         "doc_id": parsed.document.doc_id,
         "filename": parsed.document.filename,
         "sha256": parsed.document.sha256,
@@ -39,6 +46,11 @@ def sync_to_eimemory(
     eimemory_cmd: str | None = None,
     jsonl_path: Path | None = None,
 ) -> dict[str, Any]:
+    """Run a CLI sync in dry-run or apply mode.
+
+    Keep transport responsibilities here; parsing and replay/evolution remain in
+    their owning domains (`eidocs` schema, `eitraining`/`eiskills` replay logic).
+    """
     event = build_memory_event(parsed, index_ref=str(Path(root).expanduser() / "indexes"))
     if jsonl_path:
         write_jsonl_event(event, jsonl_path)
